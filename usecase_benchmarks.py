@@ -1,9 +1,10 @@
-import re
 import os
 import sys
+import time
 import argparse
 import logging
 import contextlib
+from StringIO import StringIO
 
 from elapsed_time import elapsed_time
 from dvid_url_fields import DvidUrlFields
@@ -78,7 +79,13 @@ def master_main():
         # Execute on remote server
         with fab.cd(parsed_args.cwd):
             logger.info(qsub_cmd)
-            fab.run( qsub_cmd )
+            cmd_result = fab.run( qsub_cmd )
+            if len(cmd_result.stderr) > 0:
+                raise Exception("Failed to launch node task.  Output was: {}".format( cmd_result.stderr ))
+            assert cmd_result.startswith("Your job")
+            assert cmd_result.endswith("has been submitted")
+            job_id_string = cmd_result.split()[2]
+            return job_id_string
 
     # Remove old output files first.
     with fab.cd(parsed_args.cwd):
@@ -89,10 +96,35 @@ def master_main():
     intersecting_rois = getIntersectingRois( parsed_args.total_roi[1],
                                              parsed_args.node_blockshape,
                                              parsed_args.total_roi )
+    job_ids = []
     for index, (start, stop) in enumerate(intersecting_rois):
-        launch_node( (list(start), list(stop)), "J{}".format(index) )
+        job_id_str = launch_node( (list(start), list(stop)), "J{}".format(index) )
+        job_ids.append(job_id_str)
 
-    print "MAIN FINISHED."
+    logger.info( "Waiting for {} jobs: {}".format( len(job_ids), job_ids ) )
+    wait_for_jobs(job_ids)
+
+    logger.info( "FINISHED." )
+
+def wait_for_jobs( job_ids, hide_output=True, poll_interval=2.0 ):
+    import fabric.api as fab
+    fab.env.host_string = CLUSTER_ACCESS_SERVER
+    while job_ids:
+        if hide_output:
+            with fab.hide('running'):
+                qstat_output = fab.run('qstat', stdout=StringIO())
+        else:
+            qstat_output = fab.run('qstat')
+
+        if qstat_output.failed:
+            raise Exception("Error executing qstat.  Output was: \n" + qstat_output)
+
+        for job_id in list(job_ids):
+            if job_id not in qstat_output:
+                job_ids.remove(job_id)
+
+        if job_ids:
+            time.sleep(poll_interval)
 
 def node_main():
     """
