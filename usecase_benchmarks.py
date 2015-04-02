@@ -3,8 +3,10 @@ import sys
 import time
 import argparse
 import logging
+import threading
 import contextlib
 from StringIO import StringIO
+from functools import partial
 
 from elapsed_time import elapsed_time
 from dvid_url_fields import DvidUrlFields
@@ -36,6 +38,9 @@ def master_main():
     The main entry point for the master process.
     Decides how to split the volume and then uses 'qsub' to launch the node tasks for each subvolume.
     """
+    import fabric.api as fab
+    fab.env.host_string = CLUSTER_ACCESS_SERVER
+
     logger = logging.getLogger("master_main")
     logger.addHandler(log_handler)
     logger.setLevel(logging.INFO)
@@ -56,9 +61,6 @@ def master_main():
              == len(parsed_args.total_roi[1]) 
              == len(parsed_args.node_blockshape) 
              == len(parsed_args.request_blockshape) )
-
-    import fabric.api as fab
-    fab.env.host_string = CLUSTER_ACCESS_SERVER
 
     def launch_node( node_roi, task_name ):
         task_args = "node '{}' {} '{}' '{}' {}"\
@@ -93,12 +95,12 @@ def master_main():
         logger.info(rm_cmd)
         fab.run( rm_cmd )
     
-    intersecting_rois = getIntersectingRois( parsed_args.total_roi[1],
-                                             parsed_args.node_blockshape,
-                                             parsed_args.total_roi )
+    node_rois = getIntersectingRois( parsed_args.total_roi[1],
+                                     parsed_args.node_blockshape,
+                                     parsed_args.total_roi )
     job_ids = []
-    for index, (start, stop) in enumerate(intersecting_rois):
-        job_id_str = launch_node( (list(start), list(stop)), "J{}".format(index) )
+    for index, (start, stop) in enumerate(node_rois):
+        job_id_str = launch_node( (list(start), list(stop)), "J{:04}".format(index) )
         job_ids.append(job_id_str)
 
     logger.info( "Waiting for {} jobs: {}".format( len(job_ids), job_ids ) )
@@ -154,10 +156,24 @@ def node_main():
                                         parsed_args.dvid_volume_url.dataname,
                                         parsed_args.dvid_volume_url.query_args )
 
-        # TODO: This requests the entire node_roi.
-        #       Split it into several request rois in multiple threads (processes?)
+        block_rois = getIntersectingRois( parsed_args.node_roi[1],
+                                          parsed_args.request_blockshape,
+                                          parsed_args.node_roi )
+
+        def request_block( block_roi ):
+            node_data = dvid_accessor.get_ndarray( *block_roi )
+
+        threads = []
+        for block_roi in block_rois:
+            t = threading.Thread(target=partial(request_block, block_roi))
+            threads.append( t )
+        
+        for t in threads:
+            t.start()
+        
         with elapsed_time(logger) as elapsed:
-            node_data = dvid_accessor.get_ndarray( *parsed_args.node_roi )
+            for t in threads:
+                t.join()
 
     logger.info("DONE.")
     
@@ -170,8 +186,8 @@ if __name__ == "__main__":
                           "http://emdata1:8000/api/repo/1c6ebbd7870511e4b3dc90b11c576b54/grayscale",
                           "[(0,100,1000,1000), (1,200,2000,2000)]",
                           "(1,10,1000,1000)",
-                          "(1,10,1000,1000)",
-                          "1",
+                          "(1,10,250,250)",
+                          "4",
                           "--cwd=/groups/flyem/home/bergs/dvid_testing" ]
             
         elif DEBUG_MODE == 'node':
