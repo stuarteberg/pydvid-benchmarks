@@ -98,6 +98,8 @@ def master_main():
     
     # Create an empty csv file.
     csv_path = parsed_args.dvid_volume_url.hostname.replace(':', 'p')
+    for k,v in parsed_args.dvid_volume_url.query_args.items():
+        csv_path += '-{}-{}'.format(k,v)
     csv_path += '-{:.1g}-px-{}-nodes-{}-cpus-{}-blocks'\
                 .format( total_volume, len(node_rois), parsed_args.threads_per_node, num_request_rois )
     csv_path += '.csv'
