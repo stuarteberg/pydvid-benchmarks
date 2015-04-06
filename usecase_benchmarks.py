@@ -3,7 +3,6 @@ import sys
 import time
 import argparse
 import logging
-import threading
 import contextlib
 import collections
 from StringIO import StringIO
@@ -20,7 +19,7 @@ from fileLock import FileLock
 from roi_utils import getIntersectingRois
 
 # threadPool was copied from lazyflow/request/threadPool.py
-from threadPool import ThreadPool, LifoQueue
+from threadPool import ThreadPool, FifoQueue
 
 log_formatter = logging.Formatter('%(levelname)s %(name)s %(message)s')
 log_handler = logging.StreamHandler(sys.stdout)
@@ -206,7 +205,7 @@ def node_main():
         def request_block( block_roi ):
             node_data = dvid_accessor.get_ndarray( *block_roi )
 
-        thread_pool = ThreadPool(parsed_args.num_threads, LifoQueue)
+        thread_pool = ThreadPool(parsed_args.num_threads, FifoQueue)
         for block_roi in block_rois:
             thread_pool.wake_up( partial(request_block, block_roi) )
 
