@@ -104,7 +104,7 @@ def master_main():
     init_csv(csv_path)
 
     def launch_node( node_roi, task_name ):
-        task_args = "node '{}' {} '{}' '{}' {} {}"\
+        task_args = "node '{}' '{}' '{}' '{}' {} {}"\
                     .format( task_name, 
                              parsed_args.dvid_volume_url,
                              node_roi, 
